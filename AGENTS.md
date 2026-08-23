@@ -18,6 +18,8 @@ It is a build-plane component, not an application runtime and not a place for pr
 
 ## Required checks
 
+The complete gate list and review sequence are in [`docs/go-gates.md`](docs/go-gates.md).
+
 ```sh
 docker build --pull=false -t breachsafe-golden-go:dev .
 docker run --rm breachsafe-golden-go:dev -c 'go version && govulncheck -version && staticcheck -version && gosec -version && osv-scanner --version'
