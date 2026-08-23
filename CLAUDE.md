@@ -4,6 +4,5 @@
 
 Read [`AGENTS.md`](AGENTS.md) first. It is the authoritative repository instruction file.
 
-Use the current shared Go, CI/CD, release, quality-review, and container-hygiene guidance from
-[`breachsafe-common`](https://github.com/paul007ex/breachsafe-common/tree/main/skills/skills) rather
-than copying stale skill files into this repository.
+Use the pinned shared Go, CI/CD, release, quality-review, and container-hygiene guidance listed in
+[`docs/skills.md`](docs/skills.md). Do not copy skill files into this repository.
