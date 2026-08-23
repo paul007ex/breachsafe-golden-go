@@ -2,7 +2,7 @@
 
 # BreachSAFE Go toolchain
 
-`breachsafe-container-go` is the shared, pinned CI/build image for BreachSAFE Go repositories.
+`breachsafe-golden-go` is the shared, pinned CI/build image for BreachSAFE Go repositories.
 It is intentionally a **toolchain image**, not an application runtime image.
 
 Included gates and tools:

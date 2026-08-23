@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/paul007ex/breachsafe-container-go
+  IMAGE: ghcr.io/paul007ex/breachsafe-golden-go
   TAG: "1.26.6"
 
 permissions:
