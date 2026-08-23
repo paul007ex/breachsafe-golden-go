@@ -35,7 +35,12 @@ RUN apk add --no-cache \
 # reusing them between builds. The previous single RUN had no mounts, so every build
 # recompiled from scratch AND baked /root/.cache/go-build into the published image:
 # dead weight that USER 65532 could never read anyway (HOME=/tmp, XDG_CACHE_HOME=/tmp/.cache).
-# `go clean` is belt-and-braces for anything the mounts do not cover.
+#
+# Do NOT add `rm -rf /root/.cache` or a `test ! -d` assertion inside this RUN. The mount
+# target is a live mountpoint for the duration of the step, so the directory necessarily
+# exists and cannot be removed; both attempts fail the build. Exclusion from the layer is
+# what the mount already guarantees. doctor.sh asserts the absence at RUNTIME, which is the
+# only place the question is meaningful.
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
     set -eux; \
@@ -43,10 +48,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}; \
     go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}; \
     go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}; \
-    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}; \
-    go clean -cache -modcache -testcache 2>/dev/null || true; \
-    rm -rf /root/.cache /root/go; \
-    test ! -d /root/.cache/go-build
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
 
 RUN set -eux; \
     addgroup -S -g 65532 breachsafe; \
