@@ -9,8 +9,7 @@ ARG STATICCHECK_VERSION=2025.1.1
 ARG GOSEC_VERSION=v2.22.11
 ARG OSV_SCANNER_VERSION=v2.4.0
 
-ENV CGO_ENABLED=0 \
-    GOFLAGS=-mod=readonly \
+ENV GOFLAGS=-mod=readonly \
     GOTOOLCHAIN=go1.26.6 \
     GOBIN=/usr/local/bin \
     PATH=/usr/local/go/bin:/usr/local/bin:$PATH
@@ -18,9 +17,11 @@ ENV CGO_ENABLED=0 \
 RUN apk add --no-cache \
       bash \
       ca-certificates \
+      gcc \
       git \
       jq \
       make \
+      musl-dev \
       tar \
       wget \
     && update-ca-certificates \
@@ -34,7 +35,9 @@ RUN apk add --no-cache \
     && chown -R 65532:65532 /workspace /go/cache /go/pkg
 
 ENV GOCACHE=/go/cache \
-    GOPATH=/go/pkg
+    GOPATH=/go/pkg \
+    HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache
 
 WORKDIR /workspace
 USER 65532:65532
