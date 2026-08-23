@@ -27,5 +27,4 @@ jobs:
         run: docker build --pull=false --tag breachsafe-go-toolchain:ci .
       - name: Smoke-test toolchain
         run: |
-          docker run --rm breachsafe-go-toolchain:ci -c \
-            'go version && govulncheck -version && staticcheck -version && gosec -version && osv-scanner --version'
+          docker run --rm breachsafe-go-toolchain:ci golden-go-doctor
