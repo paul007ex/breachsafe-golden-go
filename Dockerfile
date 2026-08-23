@@ -47,7 +47,8 @@ COPY --chmod=0755 doctor.sh /usr/local/bin/golden-go-doctor
 USER 65532:65532
 
 LABEL org.opencontainers.image.title="BreachSAFE Go toolchain" \
-      org.opencontainers.image.description="Pinned Go build, test, and security-gate environment" \
-      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
+	org.opencontainers.image.description="Pinned Go build, test, and security-gate environment" \
+	org.opencontainers.image.source="https://github.com/paul007ex/breachsafe-golden-go" \
+	org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 
 ENTRYPOINT ["/bin/bash"]
