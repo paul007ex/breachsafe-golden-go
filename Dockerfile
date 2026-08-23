@@ -23,6 +23,7 @@ RUN apk add --no-cache \
       jq \
       make \
       musl-dev \
+      poppler-utils \
       tar \
       wget \
     && update-ca-certificates \
