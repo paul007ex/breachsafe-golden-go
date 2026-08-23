@@ -1,21 +1,34 @@
-version = 1
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+#
+# All first-party content in this repo is PolyForm-Noncommercial-1.0.0, the BQP
+# platform default. The repo is PUBLIC, which is a distribution decision and not a
+# licence one: PolyForm is source-available, not open source. Do not describe this
+# image or its Dockerfile as open source.
+#
+# The glob list below is enumerated against `git ls-files` rather than copied from a
+# sibling repo. The previous version was inherited from breachsafe-container and
+# claimed workbench/**, stacks/**, and .devcontainer/**, none of which exist here,
+# while omitting AGENTS.md, CLAUDE.md, docs/**, doctor.sh, REUSE.toml, and LICENSES/**.
+# `reuse lint` therefore failed at 9/13 files before this was corrected.
 
-# breachsafe-container: pinned BreachSAFE toolchain image (CI runtime + devcontainer).
-# First-party BreachSAFE infrastructure under the standing PolyForm-Noncommercial-1.0.0
-# default. "aggregate" precedence lets any file with its own inline SPDX header keep it;
-# this fills the rest.
+version = 1
+SPDX-PackageName = "breachsafe-golden-go"
+SPDX-PackageSupplier = "BreachSAFE <security@breachsafe.io>"
+SPDX-PackageDownloadLocation = "https://github.com/paul007ex/breachsafe-golden-go"
 
 [[annotations]]
 path = [
   "Dockerfile",
+  ".dockerignore",
   ".github/**",
-  ".devcontainer/**",
+  "docs/**",
+  "doctor.sh",
+  "AGENTS.md",
+  "CLAUDE.md",
   "README.md",
   "LICENSE",
-  ".gitignore",
-  ".dockerignore",
-  "workbench/**",
-  "stacks/**",
+  "LICENSES/**",
+  "REUSE.toml",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 BreachSAFE <https://www.breachsafe.io>"

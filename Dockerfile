@@ -15,6 +15,9 @@ ENV GOFLAGS=-mod=readonly \
     GOBIN=/usr/local/bin \
     PATH=/usr/local/go/bin:/usr/local/bin:$PATH
 
+# Split from the tool installs so an apk change and a tool-version bump invalidate
+# different layers. Previously one RUN did everything, so bumping any single tool
+# version recompiled all five and re-ran apk add (issue #6).
 RUN apk add --no-cache \
       bash \
       ca-certificates \
@@ -26,16 +29,30 @@ RUN apk add --no-cache \
       poppler-utils \
       tar \
       wget \
-    && update-ca-certificates \
-    && go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} \
-    && go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} \
-    && go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION} \
-    && go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION} \
-    && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} \
-    && addgroup -S -g 65532 breachsafe \
-    && adduser -S -D -H -u 65532 -G breachsafe breachsafe \
-    && mkdir -p /workspace /go/cache /go/pkg \
-    && chown -R 65532:65532 /workspace /go/cache /go/pkg
+    && update-ca-certificates
+
+# Cache mounts keep the Go module and build caches OUT of the image layers while still
+# reusing them between builds. The previous single RUN had no mounts, so every build
+# recompiled from scratch AND baked /root/.cache/go-build into the published image:
+# dead weight that USER 65532 could never read anyway (HOME=/tmp, XDG_CACHE_HOME=/tmp/.cache).
+# `go clean` is belt-and-braces for anything the mounts do not cover.
+RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    set -eux; \
+    go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}; \
+    go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}; \
+    go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}; \
+    go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}; \
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}; \
+    go clean -cache -modcache -testcache 2>/dev/null || true; \
+    rm -rf /root/.cache /root/go; \
+    test ! -d /root/.cache/go-build
+
+RUN set -eux; \
+    addgroup -S -g 65532 breachsafe; \
+    adduser -S -D -H -u 65532 -G breachsafe breachsafe; \
+    mkdir -p /workspace /go/cache /go/pkg; \
+    chown -R 65532:65532 /workspace /go/cache /go/pkg
 
 ENV GOCACHE=/go/cache \
     GOPATH=/go/pkg \
