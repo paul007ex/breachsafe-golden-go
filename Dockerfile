@@ -41,8 +41,14 @@ RUN apk add --no-cache \
 # exists and cannot be removed; both attempts fail the build. Exclusion from the layer is
 # what the mount already guarantees. doctor.sh asserts the absence at RUNTIME, which is the
 # only place the question is meaningful.
+# GOMODCACHE is /go/pkg/mod, not /root/go/pkg/mod: the golang base image sets ENV GOPATH=/go.
+# Verified: `docker run golang:1.26.6-alpine go env GOMODCACHE` -> /go/pkg/mod. The previous
+# mount targeted a path nothing writes to, so the module cache was excluded from nothing and
+# shipped inside the image. Trivy then scanned dependency TEST FIXTURES vendored under it
+# (guava-31.1-jre.jar, javareach-test.jar, docker/distribution integration data) and reported
+# 45 of 51 findings against files this image never executes.
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     set -eux; \
     go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}; \
     go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}; \
