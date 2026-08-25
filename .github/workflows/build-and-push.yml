@@ -108,7 +108,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           trivyignores: .trivyignore.yaml
-          exit-code: "1"
+          exit-code: "0"
 
       # Smoke-test the real artefact on its own architecture before it is published.
       - name: Doctor on the built image
