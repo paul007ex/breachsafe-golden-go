@@ -115,6 +115,17 @@ jobs:
         if: matrix.arch == 'amd64'
         run: docker run --rm gg:scan golden-go-doctor
 
+      # The amd64 image is smoke-tested above; the arm64 image was published
+      # UNTESTED (issue #17: it shipped amd64 binaries under an arm64 label and
+      # nothing caught it). Build+load the current arch and RUN it on this native
+      # runner. A label is not evidence the binary executes.
+      - name: Doctor the arm64 image on its native runner
+        if: matrix.arch != 'amd64'
+        run: |
+          docker buildx build --platform "linux/${{ matrix.arch }}" --load \
+            -t "gg:smoke-${{ matrix.arch }}" --file ./Dockerfile .
+          docker run --rm "gg:smoke-${{ matrix.arch }}" golden-go-doctor
+
       - name: Build + push ${{ matrix.arch }} by digest (native, no emulation)
         run: |
           set -euo pipefail
@@ -169,6 +180,7 @@ jobs:
           for f in digests/*; do refs="$refs ${IMAGE}@$(cat "$f")"; done
           # SERIES is what consumers pin: a Go patch bump then needs no edit downstream.
           for tag in "$SERIES" "$PATCH" latest; do
+            # shellcheck disable=SC2086  # $refs is an intentional space-separated list of image refs
             docker buildx imagetools create --tag "${IMAGE}:${tag}" $refs
           done
           docker buildx imagetools inspect "${IMAGE}:${SERIES}"
@@ -196,6 +208,22 @@ jobs:
               sys.exit(1)
           print(f"manifest platforms OK: {sorted(arches)}")
           EOF
+
+      # The assertion above checks manifest LABELS. #17 shipped an arm64-labeled
+      # image full of amd64 binaries and passed that check. Actually RUN both arches
+      # of the PUBLISHED tag; fail closed if either cannot execute golden-go-doctor.
+      - name: Set up QEMU (to run the non-native arch)
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+      - name: Smoke-run BOTH arches of the published image
+        env:
+          SERIES: ${{ needs.version.outputs.series }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "== docker run --platform linux/$arch =="
+            docker run --rm --platform "linux/$arch" "${IMAGE}:${SERIES}" golden-go-doctor
+          done
+          echo "both arches execute golden-go-doctor"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2

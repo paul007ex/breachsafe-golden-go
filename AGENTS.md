@@ -16,6 +16,22 @@ It is a build-plane component, not an application runtime and not a place for pr
 - SBOM and provenance attestations are required for published images.
 - Do not add Python, QuReddy, Prowler, ePack, or product-specific runtime dependencies here.
 
+## Ten-step loop (BreachSAFE development contract)
+
+Every non-trivial change runs these; a skipped step is reported as `NOT RUN` with a reason.
+A green command that did not execute the required scope is not evidence.
+
+1. **Inventory** — read this file, `CLAUDE.md`, the issue, the tree, and the applicable skills.
+2. **Steelman** — state the strongest case and the smallest defensible change.
+3. **Isolated reproduction** — reproduce in a fresh temp workstream before touching the checkout.
+4. **Pressure test** — alternatives, malformed input, both CPU arches, failure paths, regressions.
+5. **Surgical implementation** — the smallest contract-preserving change.
+6. **Regression test** — a check that fails before the fix (e.g. the image runs on both arches).
+7. **Quality gates** — build, `go vet`/`gofmt`, tests + race, govulncheck/staticcheck/gosec/osv-scanner, actionlint, with real exit codes.
+8. **Architecture/anti-pattern review** — ownership, pins, duplication, size, logging, extensibility.
+9. **Issue/Git workflow** — evidence, commit, push, PR/merge under the repo's authorization rules.
+10. **Release verification** — independently validate the published image, signatures/provenance, and a real `docker run` smoke on **every** published architecture.
+
 ## Required checks
 
 The complete gate list and review sequence are in [`docs/go-gates.md`](docs/go-gates.md).
