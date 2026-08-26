@@ -129,11 +129,12 @@ jobs:
       - name: Build + push ${{ matrix.arch }} by digest (native, no emulation)
         run: |
           set -euo pipefail
+          # --provenance=false: a per-arch push WITH provenance is an index, and
+          # imagetools create from two indexes crossed platform<->content (#17). Push
+          # plain single-arch images; provenance/SBOM are attached once at the merge.
           docker buildx build \
             --platform "linux/${{ matrix.arch }}" \
-            --provenance=false --sbom=false \  # plain single-arch image, not an index:
-            # per-arch provenance made each push an index; imagetools create then crossed
-            # platform<->content (#17). Provenance/SBOM are attached ONCE at the merge below.
+            --provenance=false --sbom=false \
             --metadata-file "$RUNNER_TEMP/meta.json" \
             --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
             --file ./Dockerfile \
