@@ -209,21 +209,6 @@ jobs:
           print(f"manifest platforms OK: {sorted(arches)}")
           EOF
 
-      # The assertion above checks manifest LABELS. #17 shipped an arm64-labeled
-      # image full of amd64 binaries and passed that check. Actually RUN both arches
-      # of the PUBLISHED tag; fail closed if either cannot execute golden-go-doctor.
-      - name: Set up QEMU (to run the non-native arch)
-        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
-      - name: Smoke-run BOTH arches of the published image
-        env:
-          SERIES: ${{ needs.version.outputs.series }}
-        run: |
-          set -euo pipefail
-          for arch in amd64 arm64; do
-            echo "== docker run --platform linux/$arch =="
-            docker run --rm --platform "linux/$arch" "${IMAGE}:${SERIES}" golden-go-doctor
-          done
-          echo "both arches execute golden-go-doctor"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -237,3 +222,38 @@ jobs:
                     | python3 -c 'import json,sys;print(json.load(sys.stdin)["digest"])')"
           cosign sign --yes "${IMAGE}@${digest}"
           echo "signed ${IMAGE}@${digest}"
+
+  # Post-publish executable smoke on NATIVE runners (no QEMU — emulating a full Go
+  # toolchain is far too slow). Docker selects the matching arch from the multi-arch
+  # tag automatically, so each runner exercises the real published image for its own
+  # architecture. This is the gate #17 lacked: run the image, do not trust the label.
+  smoke:
+    name: Smoke ${{ matrix.arch }} (native, published tag)
+    needs: [version, manifest]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run the published image on native ${{ matrix.arch }}
+        env:
+          SERIES: ${{ needs.version.outputs.series }}
+        run: |
+          set -euo pipefail
+          got="$(docker run --rm "${IMAGE}:${SERIES}" -c 'uname -m')"
+          echo "published ${IMAGE}:${SERIES} ran on native ${{ matrix.arch }} as: ${got}"
+          docker run --rm "${IMAGE}:${SERIES}" golden-go-doctor
