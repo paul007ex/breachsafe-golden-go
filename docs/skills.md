@@ -2,16 +2,34 @@
 
 # Shared skills
 
-The canonical skill source is [`breachsafe-common`](https://github.com/paul007ex/breachsafe-common),
-pinned for this repository at commit [`f5567523bd25b719159380c1f4d02670184fbf02`](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills).
+The canonical skill library lives in `breachsafe-common`, which is **private**. This
+repository is public, so it names the skills and does not link to them. Earlier revisions
+linked to pinned `breachsafe-common` URLs; those return HTTP 404 to anyone without access
+to that repository, which makes them useless as instructions in a public repo.
 
-Do not copy these skills into this repository. Read the pinned source when performing the relevant
-work; update the pin only through a reviewed change.
+## How to read them
 
-| Skill | Use for |
+Skills are read from a local checkout, never copied into this repository
+(platform `CLAUDE.md` section 8, `breachsafe-common/CLAUDE.md` section 7).
+
+```sh
+# from $BQP_ROOT, with both repositories checked out side by side
+ln -s ../../breachsafe-common/skills/skills breachsafe-golden-go/.claude/skills
+```
+
+`.claude/` is gitignored, so nothing from the private repository enters this public one.
+The symlink tracks the checkout, so there is no pinned commit to go stale. Run
+`breachsafe-common/skills/scripts/drift_check.py` before converting any repository that
+currently holds copies.
+
+## Skills that apply here
+
+| Skill | Use when |
 |---|---|
-| [breachsafe-go-engineering](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills/breachsafe-go-engineering) | Go structure, APIs, tests, and conventions |
-| [breachsafe-cicd-hygiene](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills/breachsafe-cicd-hygiene) | Workflow concurrency, duplicate CI, and false-green checks |
-| [breachsafe-container-hygiene](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills/breachsafe-container-hygiene) | Dockerfile, image, and runtime hardening |
-| [breachsafe-quality-review](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills/breachsafe-quality-review) | Local gates, diff review, and test integrity |
-| [breachsafe-release](https://github.com/paul007ex/breachsafe-common/tree/f5567523bd25b719159380c1f4d02670184fbf02/skills/skills/breachsafe-release) | Go supply-chain and release readiness |
+| `breachsafe-go-engineering` | Go structure, APIs, tests, and conventions |
+| `breachsafe-cicd-hygiene` | Workflow concurrency, duplicate CI, and false-green checks |
+| `breachsafe-container-hygiene` | Dockerfile, image, and runtime hardening |
+| `breachsafe-quality-review` | PR-diff hygiene and the anti-pattern catalog |
+| `breachsafe-release` | Supply chain, provenance, signing, and Scorecard posture |
+
+`breachsafe-common/skills/skills/INDEX.md` is the full router.

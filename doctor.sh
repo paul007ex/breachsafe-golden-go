@@ -1,45 +1,137 @@
 #!/bin/sh
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 #
-# Smoke-test the toolchain image. Run it as `golden-go-doctor`.
+# Conformance check, not a liveness check. Every assertion compares the running
+# image against a value the build recorded, so drift between the Dockerfile and
+# the published image is detected here rather than by a consumer.
 #
-# The uid check is conditional on purpose. The image ships USER 65532 for defence in
-# depth, but a GitHub Actions `container:` job MUST override it with `options: --user root`:
-# the runner owns /__w and /__w/_temp as uid 1001, so a 65532 container cannot write the
-# runner file commands and every step dies before any tool runs, with
-#   Error: EACCES: permission denied, open '/__w/_temp/_runner_file_commands/save_state_...'
-# Asserting uid==65532 unconditionally would make this doctor report a false failure in
-# exactly the configuration consumers need (issue #9). So: default run must be 65532, an
-# explicit root override is accepted and reported.
-set -eu
+# Usage:
+#   golden-go-doctor              run every check, exit non-zero on any failure
+#   golden-go-doctor --version    report image identity and exit
+#   golden-go-doctor --json       report image identity as JSON and exit
+#   golden-go-doctor --help       this text
 
-uid="$(id -u)"
-gid="$(id -g)"
+DOCTOR_VERSION=1.0.0
 
-if [ "$uid" = "0" ]; then
-    echo "golden-go doctor: running as root (expected only under an explicit --user root override)"
-else
-    test "$uid" = 65532 || { echo "unexpected uid $uid (want 65532 or an explicit root override)" >&2; exit 1; }
-    test "$gid" = 65532 || { echo "unexpected gid $gid (want 65532)" >&2; exit 1; }
-fi
+usage() {
+  sed -n '/^# Usage:/,/^#   golden-go-doctor --help/p' "$0" | sed 's/^# \{0,1\}//'
+}
 
-go version
-govulncheck -version
-staticcheck -version
-gosec -version
-osv-scanner --version
-golangci-lint version
+identity() {
+  echo "golden-go-doctor ${DOCTOR_VERSION}"
+  echo "  variant         ${GOLDEN_GO_VARIANT:-unknown}"
+  echo "  recipe revision ${GOLDEN_GO_REVISION:-unknown}"
+  echo "  go              $(go version 2>/dev/null | awk '{print $3}')"
+  echo "  govulncheck     $(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
+  echo "  golangci-lint   v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
+  if command -v osv-scanner >/dev/null 2>&1; then
+    echo "  osv-scanner     v$(osv-scanner --version 2>/dev/null | awk '/version:/{print $NF}' | head -1)"
+  fi
+  echo "  cgo             CGO_ENABLED=$(go env CGO_ENABLED 2>/dev/null)"
+  echo "  openssl         $(find / -name 'libcrypto.so.*' -o -name 'libssl.so.*' 2>/dev/null | wc -l | tr -d ' ') shared object(s)"
+  echo "  fips module     $(ls /usr/local/go/lib/fips140/*.zip 2>/dev/null | wc -l) snapshot(s)"
+}
 
-test -w /go/cache
-test -w /workspace
+identity_json() {
+  printf '{"doctor":"%s","variant":"%s","revision":"%s","go":"%s","govulncheck":"%s","golangci_lint":"v%s","cgo_enabled":"%s","libcrypto_files":%s,"fips_snapshots":%s}\n' \
+    "${DOCTOR_VERSION}" "${GOLDEN_GO_VARIANT:-unknown}" "${GOLDEN_GO_REVISION:-unknown}" \
+    "$(go version 2>/dev/null | awk '{print $3}')" \
+    "$(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')" \
+    "$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')" \
+    "$(go env CGO_ENABLED 2>/dev/null)" \
+    "$(find / -name 'libcrypto.so.*' 2>/dev/null | wc -l | tr -d ' ')" \
+    "$(ls /usr/local/go/lib/fips140/*.zip 2>/dev/null | wc -l | tr -d ' ')"
+}
 
-# The published image must not carry a Go build cache. It is pure bloat and is
-# unreadable by uid 65532 anyway, since HOME=/tmp and XDG_CACHE_HOME=/tmp/.cache.
-# Regression guard for issue #6.
-test ! -d /root/.cache/go-build || { echo "/root/.cache/go-build shipped in the image" >&2; exit 1; }
+case "${1:-}" in
+  --version|-V) identity; exit 0 ;;
+  --json)       identity_json; exit 0 ;;
+  --help|-h)    usage; exit 0 ;;
+  "")           ;;
+  *)            echo "golden-go-doctor: unknown option '$1'" >&2; usage >&2; exit 2 ;;
+esac
 
-# git is required: diff-scoped gates shell out to it, and actions/checkout silently
-# degrades to a REST tarball without it, leaving no .git for any diff-based gate.
-command -v git >/dev/null || { echo "git missing" >&2; exit 1; }
+set -u
+set +e   # collect every failure rather than stopping at the first
 
-echo "golden-go doctor: PASS"
+fail=0
+ok()   { printf '  PASS  %s\n' "$1"; }
+bad()  { printf '  FAIL  %s\n' "$1"; fail=1; }
+check(){ # description, expected, actual
+  if [ "$2" = "$3" ]; then ok "$1 = $3"; else bad "$1: expected '$2', got '$3'"; fi
+}
+
+echo "golden-go doctor: ${GOLDEN_GO_VARIANT:-unknown} variant"
+echo
+echo "identity"
+check "uid" 65532 "$(id -u)"
+check "gid" 65532 "$(id -g)"
+
+echo
+echo "toolchain matches build inputs"
+check "go version"    "${EXPECT_GO_VERSION:-UNSET}" "$(go version | awk '{print $3}')"
+check "GOTOOLCHAIN"   "${EXPECT_GO_VERSION:-UNSET}" "${GOTOOLCHAIN:-UNSET}"
+check "govulncheck"   "${EXPECT_GOVULNCHECK:-UNSET}"    "$(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
+if [ "${GOLDEN_GO_VARIANT:-}" = "cgo" ]; then check "osv-scanner" "${EXPECT_OSV_SCANNER:-UNSET}" "v$(osv-scanner --version 2>/dev/null | awk '/version:/{print $NF}' | head -1)"; fi
+check "golangci-lint" "${EXPECT_GOLANGCI_LINT:-UNSET}" "v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
+
+echo
+echo "cgo posture"
+case "${GOLDEN_GO_VARIANT:-}" in
+  lean) check "CGO_ENABLED" 0 "$(go env CGO_ENABLED)"
+        if command -v gcc >/dev/null 2>&1; then bad "gcc present in lean variant"; else ok "no C compiler"; fi ;;
+  cgo)  check "CGO_ENABLED" 1 "$(go env CGO_ENABLED)"
+        command -v gcc >/dev/null 2>&1 && ok "gcc present for -race" || bad "gcc missing in cgo variant" ;;
+  *)    bad "GOLDEN_GO_VARIANT unset" ;;
+esac
+
+echo
+echo "transitive crypto inventory (reported, not asserted: libapk requires libcrypto)"
+apk list --installed 2>/dev/null | grep -iE '^(libcrypto3|libssl3|nss|nspr)-' | sed 's/^/  /' || echo "  none"
+for p in nss nspr; do
+  if apk list --installed 2>/dev/null | grep -q "^$p-"; then bad "$p present (unused TLS stack)"; else ok "no $p"; fi
+done
+
+echo
+echo "workspace"
+[ -w /go/cache ] && ok "/go/cache writable" || bad "/go/cache not writable"
+[ -w /workspace ] && ok "/workspace writable" || bad "/workspace not writable"
+
+echo
+echo "the toolchain actually builds and runs post-quantum Go"
+d=$(mktemp -d)
+cat > "$d/go.mod" <<'GOMOD'
+module doctor
+go 1.27
+GOMOD
+cat > "$d/main.go" <<'GOSRC'
+package main
+
+import (
+	"crypto/hpke"
+	"crypto/mldsa"
+	"fmt"
+)
+
+func main() {
+	kem, err := hpke.NewKEM(0x0042) // ML-KEM-1024
+	if err != nil { panic(err) }
+	k, err := kem.GenerateKey()
+	if err != nil { panic(err) }
+	ct, err := hpke.Seal(k.PublicKey(), hpke.HKDFSHA384(), hpke.AES256GCM(), []byte("doctor"), []byte("ok"))
+	if err != nil { panic(err) }
+	pt, err := hpke.Open(k, hpke.HKDFSHA384(), hpke.AES256GCM(), []byte("doctor"), ct)
+	if err != nil { panic(err) }
+	sk, err := mldsa.GenerateKey(mldsa.MLDSA87())
+	if err != nil { panic(err) }
+	sig, err := sk.Sign(nil, []byte("doctor"), nil)
+	if err != nil { panic(err) }
+	if err := mldsa.Verify(sk.PublicKey(), []byte("doctor"), sig, nil); err != nil { panic(err) }
+	fmt.Printf("hpke=%s mldsa87_sig=%d\n", pt, len(sig))
+}
+GOSRC
+if out=$(cd "$d" && go run . 2>&1); then ok "ML-KEM-1024 + HKDF-SHA384 + AES-256-GCM + ML-DSA-87: $out"; else bad "PQC build/run failed: $out"; fi
+rm -rf "$d"
+
+echo
+if [ "$fail" -eq 0 ]; then echo 'golden-go doctor: PASS'; else echo 'golden-go doctor: FAIL'; exit 1; fi

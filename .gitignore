@@ -1,0 +1,3 @@
+# Shared skills are symlinked from the breachsafe-common checkout, never committed.
+# See docs/skills.md and platform CLAUDE.md section 8.
+.claude/

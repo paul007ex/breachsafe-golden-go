@@ -16,15 +16,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  image:
+  # Build both variants, prove each one's contract, and run the gates that
+  # docs/go-gates.md documents against a real fixture module. A gate that has
+  # never executed is not a gate.
+  lean:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Build toolchain image
-        run: docker build --pull=false --tag breachsafe-go-toolchain:ci .
-      - name: Smoke-test toolchain
+
+      - name: Build lean variant
+        run: docker build --target lean --tag golden-go:lean .
+
+      - name: Conformance check
+        run: docker run --rm golden-go:lean golden-go-doctor
+
+      - name: Assert the scrub held
         run: |
-          docker run --rm breachsafe-go-toolchain:ci golden-go-doctor
+          docker run --rm --entrypoint sh golden-go:lean -c '
+            set -eu
+            n=$(find / \( -name "libcrypto*" -o -name "libssl*" -o -name "libnss*" -o -name "libnspr*" \) 2>/dev/null | wc -l)
+            [ "$n" -eq 0 ] || { echo "::error::lean variant contains $n OpenSSL/NSS files"; exit 1; }
+            command -v gcc >/dev/null 2>&1 && { echo "::error::lean variant contains a C compiler"; exit 1; }
+            command -v apk >/dev/null 2>&1 && { echo "::error::lean variant retains the package manager"; exit 1; }
+            [ "$(go env CGO_ENABLED)" = "0" ] || { echo "::error::CGO_ENABLED is not 0"; exit 1; }
+            test -f /usr/local/go/lib/fips140/v1.0.0-c2097c7c.zip || { echo "::error::FIPS module pruned"; exit 1; }
+            echo "lean contract holds: 0 OpenSSL, 0 NSS, no gcc, no apk, CGO_ENABLED=0, FIPS module intact"
+          '
+
+      # The gates from docs/go-gates.md, executed. Not documented, executed.
+      - name: Run the documented gates against the fixture
+        run: |
+          docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:lean -c '
+            set -eu
+            echo "::group::gofmt";        test -z "$(gofmt -l .)"      ; echo ok; echo "::endgroup::"
+            echo "::group::go vet";       go vet ./...                 ; echo "::endgroup::"
+            echo "::group::go test";      go test ./...                ; echo "::endgroup::"
+            echo "::group::go mod verify"; go mod verify               ; echo "::endgroup::"
+            echo "::group::govulncheck";  govulncheck ./...            ; echo "::endgroup::"
+            echo "::group::golangci-lint"; golangci-lint run --config /workspace/.golangci.yml ./... ; echo "::endgroup::"
+          '
+
+      - name: Prove GOFIPS140 produces a certified-module binary
+        run: |
+          docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:lean -c '
+            set -eu
+            GOFIPS140=v1.0.0 go build -o /tmp/fixture ./...
+            go version -m /tmp/fixture | grep -q "GOFIPS140=v1.0.0" \
+              || { echo "::error::GOFIPS140 not recorded in the binary"; exit 1; }
+            echo "certified module recorded: $(go version -m /tmp/fixture | grep GOFIPS140)"
+          '
+
+  cgo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Build cgo variant
+        run: docker build --target cgo --tag golden-go:cgo .
+
+      - name: Conformance check
+        run: docker run --rm golden-go:cgo golden-go-doctor
+
+      # The race gate lives here because -race requires cgo.
+      - name: Race gate (requires cgo, cannot run in lean)
+        run: |
+          docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:cgo -c '
+            set -eu
+            [ "$(go env CGO_ENABLED)" = "1" ] || { echo "::error::cgo variant has CGO_ENABLED=0"; exit 1; }
+            go test -race ./...
+          '
