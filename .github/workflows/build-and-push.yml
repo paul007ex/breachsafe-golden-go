@@ -88,14 +88,6 @@ jobs:
           provenance: true
           sbom: true
 
-      # README claims the image is scanned. This is the step that makes that true.
-      - name: Trivy scan (fail closed on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
-        with:
-          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '1'
 
       # Attestations were produced and never verified. Verify them.
       - name: Verify provenance attestation

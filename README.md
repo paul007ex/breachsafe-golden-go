@@ -99,7 +99,11 @@ asserts the running image against them. A refresh must:
 1. update the `FROM` digest and any tool `ARG`;
 2. run `golden-go-doctor` in both variants, which fails on any version mismatch;
 3. run the gates in `.github/workflows/ci.yml` against `testdata/fixture`;
-4. publish, which fails closed if the immutable patch tag already exists, scans the image with
-   Trivy at HIGH and CRITICAL, and verifies the provenance attestation.
+4. publish, which fails closed if the immutable patch tag already exists and verifies the
+   provenance attestation.
+
+The published image is **not** vulnerability-scanned in CI today. `govulncheck` covers the Go
+module graph, and nothing covers the OS package layer. The lean variant carries no OpenSSL and
+about ten packages, so that surface is small; it is not zero. Tracked as an open gap.
 
 Steps 2 through 4 are enforced by CI, not by convention.
