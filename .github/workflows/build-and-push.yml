@@ -72,12 +72,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Two targets, two tag sets. Without an explicit `target:` Docker builds the
+      # LAST stage in the Dockerfile, which silently published cgo as the default.
+      - name: Build and push (lean, default)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./Dockerfile
+          target: lean
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
@@ -88,8 +91,22 @@ jobs:
           provenance: true
           sbom: true
 
+      - name: Build and push (cgo)
+        id: build_cgo
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: cgo
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.immutable }}-cgo
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.patch }}-cgo
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.series }}-cgo
+          provenance: true
+          sbom: true
 
-      # Attestations were produced and never verified. Verify them.
       - name: Verify provenance attestation
         run: |
           set -euo pipefail
@@ -105,12 +122,15 @@ jobs:
             echo
             echo '| tag | mutability |'
             echo '|---|---|'
-            echo '| `${{ steps.meta.outputs.immutable }}` | immutable |'
-            echo '| `${{ steps.meta.outputs.patch }}` | moves on each recipe revision |'
-            echo '| `${{ steps.meta.outputs.series }}` | moves on each Go patch |'
+            echo '| `${{ steps.meta.outputs.immutable }}` | immutable | lean |'
+            echo '| `${{ steps.meta.outputs.patch }}` | moves per recipe revision | lean |'
+            echo '| `${{ steps.meta.outputs.series }}` | moves per Go patch | lean |'
+            echo '| `${{ steps.meta.outputs.immutable }}-cgo` | immutable | cgo |'
+            echo '| `${{ steps.meta.outputs.series }}-cgo` | moves per Go patch | cgo |'
             echo '| `latest` | moves |'
             echo
-            echo 'Digest: `${{ steps.build.outputs.digest }}`'
+            echo 'lean digest: `${{ steps.build.outputs.digest }}`'
+            echo 'cgo digest:  `${{ steps.build_cgo.outputs.digest }}`'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.build.outputs.digest }}" > image-digest.txt
 
