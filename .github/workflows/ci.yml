@@ -46,6 +46,11 @@ jobs:
           '
 
       # The gates from docs/go-gates.md, executed. Not documented, executed.
+      # The shared linter policy lives at the repo root; the fixture is what gets
+      # linted. Copy it in so golangci-lint resolves it from the working dir.
+      - name: Stage the shared linter policy into the fixture
+        run: cp .golangci.yml testdata/fixture/.golangci.yml
+
       - name: Run the documented gates against the fixture
         run: |
           docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:lean -c '
@@ -55,7 +60,7 @@ jobs:
             echo "::group::go test";      go test ./...                ; echo "::endgroup::"
             echo "::group::go mod verify"; go mod verify               ; echo "::endgroup::"
             echo "::group::govulncheck";  govulncheck ./...            ; echo "::endgroup::"
-            echo "::group::golangci-lint"; golangci-lint run --config /workspace/.golangci.yml ./... ; echo "::endgroup::"
+            echo "::group::golangci-lint"; golangci-lint run ./... ; echo "::endgroup::"
           '
 
       - name: Prove GOFIPS140 produces a certified-module binary
