@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
-# recipe-revision: r2
+# recipe-revision: r3
 # Two variants:
 #   --target lean (default)  zero OpenSSL, zero NSS, no C compiler, no package manager.
 #                            govulncheck + golangci-lint only (golangci-lint bundles
