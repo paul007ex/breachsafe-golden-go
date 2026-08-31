@@ -67,7 +67,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:lean -c '
             set -eu
-            GOFIPS140=v1.0.0 go build -o /tmp/fixture ./...
+            GOFIPS140=v1.0.0 go build -o /tmp/fixture ./cmd/fixture
             go version -m /tmp/fixture | grep -q "GOFIPS140=v1.0.0" \
               || { echo "::error::GOFIPS140 not recorded in the binary"; exit 1; }
             echo "certified module recorded: $(go version -m /tmp/fixture | grep GOFIPS140)"

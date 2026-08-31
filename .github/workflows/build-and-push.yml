@@ -107,14 +107,6 @@ jobs:
           provenance: true
           sbom: true
 
-      - name: Verify provenance attestation
-        run: |
-          set -euo pipefail
-          gh attestation verify "oci://${IMAGE}@${{ steps.build.outputs.digest }}" \
-            --repo "${{ github.repository }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Publish the digest so consumers can pin immutably
         run: |
           {
@@ -139,3 +131,20 @@ jobs:
         with:
           name: image-digest
           path: image-digest.txt
+
+
+      # Match the verifier to the signer. `provenance: true` on build-push-action
+      # attaches SLSA provenance to the image in the registry via OCI referrers. It
+      # does not populate GitHub's attestation store, which is what
+      # `gh attestation verify` reads; that store is fed by
+      # actions/attest-build-provenance. Verifying the wrong store returns 404 on a
+      # provenance that is present and correct.
+      - name: Verify provenance is attached to both images
+        run: |
+          set -euo pipefail
+          for ref in "${IMAGE}@${{ steps.build.outputs.digest }}" \
+                     "${IMAGE}@${{ steps.build_cgo.outputs.digest }}"; do
+            docker buildx imagetools inspect "$ref" --format '{{ json .Provenance }}' \
+              | grep -q buildType || { echo "::error::no provenance attached to $ref"; exit 1; }
+            echo "provenance present: $ref"
+          done
