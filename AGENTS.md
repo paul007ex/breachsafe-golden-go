@@ -21,8 +21,10 @@ It is a build-plane component, not an application runtime and not a place for pr
 The complete gate list and review sequence are in [`docs/go-gates.md`](docs/go-gates.md).
 
 ```sh
-docker build --pull=false -t breachsafe-golden-go:dev .
-docker run --rm breachsafe-golden-go:dev -c 'go version && govulncheck -version && staticcheck -version && gosec -version && osv-scanner --version'
+docker build --pull=false --target lean -t breachsafe-golden-go:lean .
+docker build --pull=false --target cgo -t breachsafe-golden-go:cgo .
+docker run --rm breachsafe-golden-go:lean golden-go-doctor
+docker run --rm breachsafe-golden-go:cgo golden-go-doctor
 ```
 
 For consumer repositories, the image is a CI dependency; do not copy its Dockerfile into them.
