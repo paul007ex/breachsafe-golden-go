@@ -33,6 +33,9 @@ Every installed package, not a summary.
 | Go | 1.27.0, `GOTOOLCHAIN` pinned | same |
 | `govulncheck` | v1.7.0 + fixed `x/mod` v0.40.0 | same |
 | `golangci-lint` | v2.13.2 | v2.13.2 |
+| `goimports` | v0.49.0 + fixed `x/mod` v0.40.0 | same |
+| `staticcheck` | v0.8.1 (2026.2.1) + fixed `x/mod` v0.40.0 | same |
+| `gosec` | v2.29.0 | v2.29.0 |
 | apk packages | `bash`, `ca-certificates-bundle`, `jq`, `make` | the above plus `git`, `gcc`, `musl-dev`, `ca-certificates` |
 | package manager | **removed** | present |
 | C compiler | **absent** | `gcc`, `musl-dev` |
@@ -40,18 +43,20 @@ Every installed package, not a summary.
 `golangci-lint` v2.13.2 bundles Go-1.27-capable Staticcheck 2026.2.1, gosec v2.28.0,
 `errcheck`, `revive`, `gocritic`, `ineffassign`, and `unused`. Both variants carry the common
 policy at `/etc/golden-go/golangci.yml`; consumers select it explicitly with `--config`.
-Standalone `gosec` and `staticcheck` are intentionally absent: duplicate analyzers add binary
-and dependency surface while producing version-dependent results.
+The five primary gates are also standalone executables so consumer CI can invoke, identify, and
+pin each contract directly. The standalone gosec is newer than the version embedded in the current
+golangci-lint release; the doctor reports both contracts rather than silently treating them as one.
+All shipped Go tools omit debug and symbol tables while retaining Go module build metadata, reducing
+the build-image layer without weakening version verification.
 
 OSV-Scanner is also intentionally external. Its multi-ecosystem Scalibr pipeline pulls container,
 filesystem, package-manager, database, and archive parsers that do not belong in a Go-only
 toolchain. Go consumers use `govulncheck`; image consumers run pinned image scanners separately.
 
-The official govulncheck v1.7.0 module currently resolves `golang.org/x/mod` v0.39.0, which image
-scanners flag for CVE-2026-56864 and CVE-2026-56865. Its own binary-mode analysis shows neither
-vulnerable symbol is reachable, but this image does not suppress the findings: the builder uses
-the exact v1.7.0 source with only `x/mod` raised to fixed v0.40.0. Remove that explicit override
-when an official govulncheck release includes the fix.
+The official govulncheck v1.7.0, goimports v0.49.0, and Staticcheck v0.8.1 module graphs currently
+resolve vulnerable `golang.org/x/mod` releases. This image does not suppress CVE-2026-56864 or
+CVE-2026-56865: the builder uses each exact tool release with only `x/mod` raised to fixed v0.40.0.
+Remove the explicit override when every upstream tool release includes the fix.
 
 Both images run as UID/GID 65532 and contain no application source or credentials. Product
 images should use their own minimal runtime base. Compilation happens only in builder stages;
@@ -63,7 +68,7 @@ Derived from the `FROM golang:` line, so a tag can never disagree with the image
 
 | Tag | Mutability | Use it when |
 |---|---|---|
-| `1.27.0-r5` | **immutable**, the workflow refuses to overwrite | reproducible builds, release provenance, lockfiles |
+| `1.27.0-r6` | **immutable**, the workflow refuses to overwrite | reproducible builds, release provenance, lockfiles |
 | `1.27.0` | moves on each recipe revision | ordinary consumers pinned to a Go patch |
 | `1.27` | moves on each patch | ordinary consumers |
 | `latest` | moves | interactive use only |
@@ -97,7 +102,7 @@ docker build --target lean -t breachsafe-go-toolchain:dev .
 docker run --rm breachsafe-go-toolchain:dev golden-go-doctor
 
 docker run --rm -v "$PWD:/workspace" breachsafe-go-toolchain:dev \
-  -c 'gofmt -l . && go vet ./... && go test ./... && go mod verify && govulncheck ./... && golangci-lint run --config /etc/golden-go/golangci.yml ./...'
+  -c 'test -z "$(gofmt -l .)" && test -z "$(goimports -l .)" && go vet ./... && go test ./... && go mod verify && staticcheck ./... && gosec -exclude-generated ./... && govulncheck ./... && golangci-lint run --config /etc/golden-go/golangci.yml ./...'
 
 # -race needs the cgo variant
 docker build --target cgo -t breachsafe-go-toolchain:cgo .

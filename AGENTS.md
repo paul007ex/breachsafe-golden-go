@@ -25,6 +25,8 @@ docker build --pull=false --target lean -t breachsafe-golden-go:lean .
 docker build --pull=false --target cgo -t breachsafe-golden-go:cgo .
 docker run --rm breachsafe-golden-go:lean golden-go-doctor
 docker run --rm breachsafe-golden-go:cgo golden-go-doctor
+docker run --rm -v "$PWD/testdata/fixture:/workspace" breachsafe-golden-go:lean \
+  -c 'test -z "$(goimports -l .)" && staticcheck ./... && gosec -exclude-generated ./... && govulncheck ./... && golangci-lint run --config /etc/golden-go/golangci.yml ./...'
 ```
 
 For consumer repositories, the image is a CI dependency; do not copy its Dockerfile into them.
