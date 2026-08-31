@@ -31,19 +31,31 @@ Every installed package, not a summary.
 | | lean | cgo |
 |---|---|---|
 | Go | 1.27.0, `GOTOOLCHAIN` pinned | same |
-| `govulncheck` | v1.7.0 | v1.7.0 |
+| `govulncheck` | v1.7.0 + fixed `x/mod` v0.40.0 | same |
 | `golangci-lint` | v2.13.2 | v2.13.2 |
-| `osv-scanner` | absent | v2.4.0 |
 | apk packages | `bash`, `ca-certificates-bundle`, `jq`, `make` | the above plus `git`, `gcc`, `musl-dev`, `ca-certificates` |
 | package manager | **removed** | present |
 | C compiler | **absent** | `gcc`, `musl-dev` |
 
-`golangci-lint` bundles `gosec`, `staticcheck`, `errcheck`, `revive`, `gocritic`, `ineffassign`,
-and `unused`. Standalone `gosec` and `staticcheck` binaries are therefore not installed; enable
-them as linters instead.
+`golangci-lint` v2.13.2 bundles Go-1.27-capable Staticcheck 2026.2.1, gosec v2.28.0,
+`errcheck`, `revive`, `gocritic`, `ineffassign`, and `unused`. Both variants carry the common
+policy at `/etc/golden-go/golangci.yml`; consumers select it explicitly with `--config`.
+Standalone `gosec` and `staticcheck` are intentionally absent: duplicate analyzers add binary
+and dependency surface while producing version-dependent results.
+
+OSV-Scanner is also intentionally external. Its multi-ecosystem Scalibr pipeline pulls container,
+filesystem, package-manager, database, and archive parsers that do not belong in a Go-only
+toolchain. Go consumers use `govulncheck`; image consumers run pinned image scanners separately.
+
+The official govulncheck v1.7.0 module currently resolves `golang.org/x/mod` v0.39.0, which image
+scanners flag for CVE-2026-56864 and CVE-2026-56865. Its own binary-mode analysis shows neither
+vulnerable symbol is reachable, but this image does not suppress the findings: the builder uses
+the exact v1.7.0 source with only `x/mod` raised to fixed v0.40.0. Remove that explicit override
+when an official govulncheck release includes the fix.
 
 Both images run as UID/GID 65532 and contain no application source or credentials. Product
-images should use their own minimal runtime base.
+images should use their own minimal runtime base. Compilation happens only in builder stages;
+Doctor fails if any Go module-cache content reaches a shipped variant.
 
 ## 3. Tags
 
@@ -51,7 +63,8 @@ Derived from the `FROM golang:` line, so a tag can never disagree with the image
 
 | Tag | Mutability | Use it when |
 |---|---|---|
-| `1.27.0` | **immutable**, the workflow refuses to overwrite | reproducible builds, release provenance, lockfiles |
+| `1.27.0-r5` | **immutable**, the workflow refuses to overwrite | reproducible builds, release provenance, lockfiles |
+| `1.27.0` | moves on each recipe revision | ordinary consumers pinned to a Go patch |
 | `1.27` | moves on each patch | ordinary consumers |
 | `latest` | moves | interactive use only |
 
@@ -84,7 +97,7 @@ docker build --target lean -t breachsafe-go-toolchain:dev .
 docker run --rm breachsafe-go-toolchain:dev golden-go-doctor
 
 docker run --rm -v "$PWD:/workspace" breachsafe-go-toolchain:dev \
-  -c 'gofmt -l . && go vet ./... && go test ./... && go mod verify && govulncheck ./... && golangci-lint run ./...'
+  -c 'gofmt -l . && go vet ./... && go test ./... && go mod verify && govulncheck ./... && golangci-lint run --config /etc/golden-go/golangci.yml ./...'
 
 # -race needs the cgo variant
 docker build --target cgo -t breachsafe-go-toolchain:cgo .
@@ -93,17 +106,22 @@ docker run --rm -v "$PWD:/workspace" breachsafe-go-toolchain:cgo -c 'go test -ra
 
 ## 6. Refresh procedure
 
-The base image digest and every tool version are explicit build inputs, and `doctor.sh`
+The multi-architecture base image digest and every tool version are explicit build inputs, and `doctor.sh`
 asserts the running image against them. A refresh must:
 
 1. update the `FROM` digest and any tool `ARG`;
 2. run `golden-go-doctor` in both variants, which fails on any version mismatch;
 3. run the gates in `.github/workflows/ci.yml` against `testdata/fixture`;
-4. publish, which fails closed if the immutable patch tag already exists and verifies the
+4. publish, which fails closed if the immutable recipe tag already exists and verifies the
    provenance attestation.
 
-The published image is **not** vulnerability-scanned in CI today. `govulncheck` covers the Go
-module graph, and nothing covers the OS package layer. The lean variant carries no OpenSSL and
-about ten packages, so that surface is small; it is not zero. Tracked as an open gap.
+Alpine package revisions intentionally follow the current security patch stream for the pinned
+`v3.24` release during that one publish build. Rebuilding the recipe later is not the release
+contract; the published OCI digest, SBOM, and provenance are. Consumers pin that digest.
+
+The publish workflow scans the exact lean and cgo image digests with a commit-pinned Trivy
+action and fails on every HIGH or CRITICAL finding. The scanner stays outside the image so its
+multi-ecosystem dependency graph is not inherited by every Go build. `govulncheck` remains the
+source-aware vulnerability gate for each consumer's own Go module.
 
 Steps 2 through 4 are enforced by CI, not by convention.

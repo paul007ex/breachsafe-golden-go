@@ -11,7 +11,7 @@
 #   golden-go-doctor --json       report image identity as JSON and exit
 #   golden-go-doctor --help       this text
 
-DOCTOR_VERSION=1.0.0
+DOCTOR_VERSION=1.1.0
 
 usage() {
   sed -n '/^# Usage:/,/^#   golden-go-doctor --help/p' "$0" | sed 's/^# \{0,1\}//'
@@ -24,12 +24,9 @@ identity() {
   echo "  go              $(go version 2>/dev/null | awk '{print $3}')"
   echo "  govulncheck     $(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
   echo "  golangci-lint   v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
-  if command -v osv-scanner >/dev/null 2>&1; then
-    echo "  osv-scanner     v$(osv-scanner --version 2>/dev/null | awk '/version:/{print $NF}' | head -1)"
-  fi
   echo "  cgo             CGO_ENABLED=$(go env CGO_ENABLED 2>/dev/null)"
   echo "  openssl         $(find / -name 'libcrypto.so.*' -o -name 'libssl.so.*' 2>/dev/null | wc -l | tr -d ' ') shared object(s)"
-  echo "  fips module     $(ls /usr/local/go/lib/fips140/*.zip 2>/dev/null | wc -l) snapshot(s)"
+  echo "  fips module     $(find /usr/local/go/lib/fips140 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ') snapshot(s)"
 }
 
 identity_json() {
@@ -40,7 +37,7 @@ identity_json() {
     "$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')" \
     "$(go env CGO_ENABLED 2>/dev/null)" \
     "$(find / -name 'libcrypto.so.*' 2>/dev/null | wc -l | tr -d ' ')" \
-    "$(ls /usr/local/go/lib/fips140/*.zip 2>/dev/null | wc -l | tr -d ' ')"
+    "$(find /usr/local/go/lib/fips140 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
 }
 
 case "${1:-}" in
@@ -72,8 +69,18 @@ echo "toolchain matches build inputs"
 check "go version"    "${EXPECT_GO_VERSION:-UNSET}" "$(go version | awk '{print $3}')"
 check "GOTOOLCHAIN"   "${EXPECT_GO_VERSION:-UNSET}" "${GOTOOLCHAIN:-UNSET}"
 check "govulncheck"   "${EXPECT_GOVULNCHECK:-UNSET}"    "$(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
-if [ "${GOLDEN_GO_VARIANT:-}" = "cgo" ]; then check "osv-scanner" "${EXPECT_OSV_SCANNER:-UNSET}" "v$(osv-scanner --version 2>/dev/null | awk '/version:/{print $NF}' | head -1)"; fi
 check "golangci-lint" "${EXPECT_GOLANGCI_LINT:-UNSET}" "v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
+for duplicate in gosec osv-scanner staticcheck; do
+  if command -v "$duplicate" >/dev/null 2>&1; then bad "duplicate analyzer present: $duplicate"; else ok "no standalone $duplicate"; fi
+done
+if [ ! -r /etc/golden-go/golangci.yml ]; then
+  bad "shared golangci policy missing"
+elif golangci-lint linters --config /etc/golden-go/golangci.yml 2>/dev/null | grep -q '^gosec:' \
+  && golangci-lint linters --config /etc/golden-go/golangci.yml 2>/dev/null | grep -q '^staticcheck:'; then
+  ok "shared golangci policy enables gosec and staticcheck"
+else
+  bad "shared golangci policy does not enable gosec and staticcheck"
+fi
 
 echo
 echo "cgo posture"
@@ -81,7 +88,7 @@ case "${GOLDEN_GO_VARIANT:-}" in
   lean) check "CGO_ENABLED" 0 "$(go env CGO_ENABLED)"
         if command -v gcc >/dev/null 2>&1; then bad "gcc present in lean variant"; else ok "no C compiler"; fi ;;
   cgo)  check "CGO_ENABLED" 1 "$(go env CGO_ENABLED)"
-        command -v gcc >/dev/null 2>&1 && ok "gcc present for -race" || bad "gcc missing in cgo variant" ;;
+        if command -v gcc >/dev/null 2>&1; then ok "gcc present for -race"; else bad "gcc missing in cgo variant"; fi ;;
   *)    bad "GOLDEN_GO_VARIANT unset" ;;
 esac
 
@@ -94,8 +101,10 @@ done
 
 echo
 echo "workspace"
-[ -w /go/cache ] && ok "/go/cache writable" || bad "/go/cache not writable"
-[ -w /workspace ] && ok "/workspace writable" || bad "/workspace not writable"
+if [ -w /go/cache ]; then ok "/go/cache writable"; else bad "/go/cache not writable"; fi
+if [ -w /workspace ]; then ok "/workspace writable"; else bad "/workspace not writable"; fi
+module_cache_entries="$(find /go/pkg/mod -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
+check "shipped module-cache entries" 0 "$module_cache_entries"
 
 echo
 echo "the toolchain actually builds and runs post-quantum Go"

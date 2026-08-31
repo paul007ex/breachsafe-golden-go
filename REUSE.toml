@@ -20,9 +20,11 @@ SPDX-PackageDownloadLocation = "https://github.com/paul007ex/breachsafe-golden-g
 path = [
   "Dockerfile",
   ".dockerignore",
-  ".trivyignore.yaml",
+  ".gitignore",
+  ".golangci.yml",
   ".github/**",
   "docs/**",
+  "testdata/**",
   "doctor.sh",
   "AGENTS.md",
   "CLAUDE.md",

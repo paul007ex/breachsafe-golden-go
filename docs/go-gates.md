@@ -11,9 +11,9 @@ go vet ./...                       # correctness checks
 go test ./...                      # unit/integration tests
 go test -race ./...                # data-race checks; CGO must be available
 go mod verify                      # module archive verification
-staticcheck ./...                  # bug and API diagnostics
+golangci-lint run --config /etc/golden-go/golangci.yml ./...
+                                    # shipped policy: staticcheck + gosec + correctness linters
 govulncheck ./...                  # reachable Go vulnerability analysis
-osv-scanner scan source -r .       # dependency vulnerability scan
 ```
 
 For product repositories, add:
@@ -23,13 +23,13 @@ CodeQL (Go, security-extended)
 golden PDF/render regression tests where output is visual
 fuzz/property tests for parsers and bounded input
 Docker build and non-root smoke test
-Trivy HIGH/CRITICAL image gate
+Trivy HIGH/CRITICAL image gate (external pinned tool; not embedded here)
 SBOM and provenance attestations
 keyless image signing and verification
 ```
 
-Do not hide findings with blanket exclusions. The current PDF prototype has gosec findings that
-must be fixed before gosec becomes a required gate there.
+Do not hide findings with blanket exclusions. Repository-specific exceptions need narrow scope,
+written rationale, an owner, and an expiry.
 
 ## Review sequence
 

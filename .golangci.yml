@@ -5,21 +5,6 @@
 version: "2"
 linters:
   default: standard
-  disable:
-    # TEMPORARY, with an exit condition.
-    #
-    # staticcheck's IR builder (honnef.co/go/tools) panics on Go 1.27 code:
-    #   buildir:   panic: unexpected expr: *ast.KeyValueExpr
-    #   typedness: panic: interface conversion: interface {} is nil, not *buildir.IR
-    #
-    # Verified against a five-line package with no Go 1.27 features, so this is
-    # not specific to new stdlib. Every other linter passes:
-    #   gosec PASS, errcheck PASS, govet PASS, unused PASS, staticcheck CRASH
-    #
-    # RE-ENABLE when golangci-lint ships a honnef.co/go/tools release that
-    # supports Go 1.27, and delete this block. Tracked in the golden-go issue
-    # that accompanies the Go 1.27 bump.
-    - staticcheck
   enable:
     - errcheck
     - errorlint
@@ -28,6 +13,7 @@ linters:
     - ineffassign
     - nilerr
     - revive
+    - staticcheck
     - unconvert
     - unused
   settings:

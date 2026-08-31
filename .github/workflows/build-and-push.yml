@@ -7,6 +7,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - .golangci.yml
       - doctor.sh
       - .github/workflows/build-and-push.yml
   workflow_dispatch:
@@ -22,25 +23,21 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  prepare:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
+      packages: read
+    outputs:
+      immutable: ${{ steps.meta.outputs.immutable }}
+      patch: ${{ steps.meta.outputs.patch }}
+      series: ${{ steps.meta.outputs.series }}
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
 
-      # The tag is derived from the image, so it can never drift from what the
-      # image contains. Fixes the case where the workflow published v0.1.0 while
-      # the registry served 1.26.6.
-      # Composite scheme: <go-version>-r<recipe-revision>.
-      # The Go version says what is inside. The revision says the recipe changed,
-      # so bumping a linter pin gets a new immutable tag without pretending Go moved.
       - name: Derive tags from the Dockerfile
         id: meta
         run: |
@@ -49,18 +46,11 @@ jobs:
           [ -n "$go_version" ] || { echo "::error::could not derive Go version from Dockerfile"; exit 1; }
           revision="$(grep -oE '^# recipe-revision: r[0-9]+' Dockerfile | head -1 | grep -oE 'r[0-9]+')"
           [ -n "$revision" ] || { echo "::error::Dockerfile is missing '# recipe-revision: rN'"; exit 1; }
-          echo "immutable=${go_version}-${revision}" >> "$GITHUB_OUTPUT"
-          echo "patch=${go_version}"                 >> "$GITHUB_OUTPUT"
-          echo "series=${go_version%.*}"             >> "$GITHUB_OUTPUT"
-
-      # The patch tag is immutable. Publishing over one is a mistake, not a refresh.
-      - name: Refuse to overwrite an existing immutable tag
-        run: |
-          set -euo pipefail
-          if docker buildx imagetools inspect "${IMAGE}:${{ steps.meta.outputs.immutable }}" >/dev/null 2>&1; then
-            echo "::error::${IMAGE}:${{ steps.meta.outputs.immutable }} already exists. Bump the Go version, or delete the tag deliberately."
-            exit 1
-          fi
+          {
+            echo "immutable=${go_version}-${revision}"
+            echo "patch=${go_version}"
+            echo "series=${go_version%.*}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -72,79 +62,331 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Two targets, two tag sets. Without an explicit `target:` Docker builds the
-      # LAST stage in the Dockerfile, which silently published cgo as the default.
-      - name: Build and push (lean, default)
+      # Only an explicit registry "not found" means the tag is available. Network,
+      # authentication, and registry errors fail closed rather than permitting a push.
+      - name: Refuse to overwrite an existing immutable tag
+        env:
+          IMMUTABLE: ${{ steps.meta.outputs.immutable }}
+        run: |
+          set +e
+          detail="$(docker buildx imagetools inspect "${IMAGE}:${IMMUTABLE}" 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error::${IMAGE}:${IMMUTABLE} already exists; bump the recipe revision"
+            exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|name unknown|not found' <<< "$detail"; then
+            echo "::error::could not establish that ${IMAGE}:${IMMUTABLE} is absent: ${detail}"
+            exit 1
+          fi
+
+  # Push each native image by digest only. No consumer-visible tag exists yet.
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: lean
+            arch: amd64
+            runner: ubuntu-latest
+          - target: lean
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - target: cgo
+            arch: amd64
+            runner: ubuntu-latest
+          - target: cgo
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build native ${{ matrix.target }} image by digest
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./Dockerfile
-          target: lean
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.immutable }}
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.patch }}
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.series }}
-            ${{ env.IMAGE }}:latest
-          provenance: true
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
           sbom: true
 
-      - name: Build and push (cgo)
-        id: build_cgo
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: ./Dockerfile
-          target: cgo
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.immutable }}-cgo
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.patch }}-cgo
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.series }}-cgo
-          provenance: true
-          sbom: true
-
-      - name: Publish the digest so consumers can pin immutably
+      - name: Record untagged digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
         run: |
+          mkdir -p digests
+          printf '%s\n' "$DIGEST" > "digests/${TARGET}-${ARCH}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.target }}-${{ matrix.arch }}
+          path: digests/${{ matrix.target }}-${{ matrix.arch }}
+          retention-days: 1
+
+  # Scan and execute every exact native digest with read-only registry access.
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: lean
+            arch: amd64
+            runner: ubuntu-latest
+          - target: lean
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - target: cgo
+            arch: amd64
+            runner: ubuntu-latest
+          - target: cgo
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download digest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digest-${{ matrix.target }}-${{ matrix.arch }}
+          path: digests
+
+      - name: Resolve exact image reference
+        id: ref
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          digest="$(cat "digests/${TARGET}-${ARCH}")"
+          echo "image_ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan — fail on HIGH/CRITICAL
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.ref.outputs.image_ref }}
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Execute image natively
+        env:
+          IMAGE_REF: ${{ steps.ref.outputs.image_ref }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          got="$(docker run --rm --pull=always --entrypoint=/bin/uname "$IMAGE_REF" -m)"
+          case "${EXPECTED_ARCH}:${got}" in
+            amd64:x86_64) ;;
+            arm64:aarch64) ;;
+            *) echo "::error::expected ${EXPECTED_ARCH}, image executed as ${got}"; exit 1 ;;
+          esac
+          docker run --rm "$IMAGE_REF" golden-go-doctor
+
+      - name: Verify per-architecture SBOM and provenance
+        env:
+          IMAGE_REF: ${{ steps.ref.outputs.image_ref }}
+          PLATFORM: linux/${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Provenance}}' > provenance.json
+          docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .SBOM}}' > sbom.json
+          jq -e --arg p "$PLATFORM" '.[$p].SLSA.buildDefinition.buildType != null' provenance.json >/dev/null
+          jq -e --arg p "$PLATFORM" '.[$p].SPDX.spdxVersion == "SPDX-2.3"' sbom.json >/dev/null
+
+  # Promotion is the only step that creates consumer-visible tags, and it cannot
+  # start until all four native image contracts have passed.
+  publish:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download verified digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Assemble candidate indexes
+        env:
+          CANDIDATE: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          lean_amd64="$(cat digests/lean-amd64)"
+          lean_arm64="$(cat digests/lean-arm64)"
+          cgo_amd64="$(cat digests/cgo-amd64)"
+          cgo_arm64="$(cat digests/cgo-arm64)"
+          docker buildx imagetools create \
+            -t "${IMAGE}:${CANDIDATE}" \
+            "${IMAGE}@${lean_amd64}" "${IMAGE}@${lean_arm64}"
+          docker buildx imagetools create \
+            -t "${IMAGE}:${CANDIDATE}-cgo" \
+            "${IMAGE}@${cgo_amd64}" "${IMAGE}@${cgo_arm64}"
+
+      - name: Verify candidate indexes and attached evidence
+        env:
+          LEAN_REF: ${{ env.IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          CGO_REF: ${{ env.IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}-cgo
+        run: |
+          set -euo pipefail
+          for ref in "$LEAN_REF" "$CGO_REF"; do
+            docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' > manifest.json
+            platforms="$(jq -r '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | unique | sort | join(",")' manifest.json)"
+            [ "$platforms" = "amd64,arm64" ] || { echo "::error::unexpected platforms for $ref: $platforms"; exit 1; }
+            docker buildx imagetools inspect "$ref" --format '{{json .Provenance}}' > provenance.json
+            docker buildx imagetools inspect "$ref" --format '{{json .SBOM}}' > sbom.json
+            for platform in linux/amd64 linux/arm64; do
+              jq -e --arg p "$platform" '.[$p].SLSA.buildDefinition.buildType != null' provenance.json >/dev/null
+              jq -e --arg p "$platform" '.[$p].SPDX.spdxVersion == "SPDX-2.3"' sbom.json >/dev/null
+            done
+          done
+
+      # Re-check both immutable names immediately before promotion. This closes the
+      # race between the early preflight and the long native build/verification fanout.
+      - name: Reconfirm both immutable tags are absent
+        env:
+          IMMUTABLE: ${{ needs.prepare.outputs.immutable }}
+        run: |
+          set -euo pipefail
+          for ref in "${IMAGE}:${IMMUTABLE}" "${IMAGE}:${IMMUTABLE}-cgo"; do
+            set +e
+            detail="$(docker buildx imagetools inspect "$ref" 2>&1)"
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              echo "::error::$ref already exists; refusing to overwrite it"
+              exit 1
+            fi
+            if ! grep -Eqi 'manifest unknown|name unknown|not found' <<< "$detail"; then
+              echo "::error::could not establish that $ref is absent: $detail"
+              exit 1
+            fi
+          done
+
+      # OCI registries do not support multi-repository transactions. Promote the
+      # cgo companion first and the default lean release last; the lean tag is the
+      # release commit point consumers follow.
+      - name: Promote cgo companion
+        env:
+          CANDIDATE: candidate-${{ github.run_id }}-${{ github.run_attempt }}-cgo
+          IMMUTABLE: ${{ needs.prepare.outputs.immutable }}-cgo
+          PATCH: ${{ needs.prepare.outputs.patch }}-cgo
+          SERIES: ${{ needs.prepare.outputs.series }}-cgo
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${IMMUTABLE}" -t "${IMAGE}:${PATCH}" -t "${IMAGE}:${SERIES}" \
+            "${IMAGE}:${CANDIDATE}"
+
+      - name: Promote lean release
+        env:
+          CANDIDATE: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          IMMUTABLE: ${{ needs.prepare.outputs.immutable }}
+          PATCH: ${{ needs.prepare.outputs.patch }}
+          SERIES: ${{ needs.prepare.outputs.series }}
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${IMMUTABLE}" -t "${IMAGE}:${PATCH}" \
+            -t "${IMAGE}:${SERIES}" -t "${IMAGE}:latest" \
+            "${IMAGE}:${CANDIDATE}"
+
+      - name: Verify promoted indexes match candidates
+        env:
+          LEAN_CANDIDATE: ${{ env.IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          CGO_CANDIDATE: ${{ env.IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}-cgo
+          LEAN_REF: ${{ env.IMAGE }}:${{ needs.prepare.outputs.immutable }}
+          CGO_REF: ${{ env.IMAGE }}:${{ needs.prepare.outputs.immutable }}-cgo
+        run: |
+          set -euo pipefail
+          assert_same() {
+            candidate_digest="$(docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r .digest)"
+            promoted_digest="$(docker buildx imagetools inspect "$2" --format '{{json .Manifest}}' | jq -r .digest)"
+            [ "$candidate_digest" = "$promoted_digest" ] \
+              || { echo "::error::$2 does not match its verified candidate"; exit 1; }
+          }
+          assert_same "$LEAN_CANDIDATE" "$LEAN_REF"
+          assert_same "$CGO_CANDIDATE" "$CGO_REF"
+
+      - name: Publish digest evidence
+        env:
+          LEAN_REF: ${{ env.IMAGE }}:${{ needs.prepare.outputs.immutable }}
+          CGO_REF: ${{ env.IMAGE }}:${{ needs.prepare.outputs.immutable }}-cgo
+          IMMUTABLE: ${{ needs.prepare.outputs.immutable }}
+          PATCH: ${{ needs.prepare.outputs.patch }}
+          SERIES: ${{ needs.prepare.outputs.series }}
+        run: |
+          set -euo pipefail
+          lean_digest="$(docker buildx imagetools inspect "$LEAN_REF" --format '{{json .Manifest}}' | jq -r .digest)"
+          cgo_digest="$(docker buildx imagetools inspect "$CGO_REF" --format '{{json .Manifest}}' | jq -r .digest)"
           {
             echo "### Published"
             echo
-            echo '| tag | mutability |'
-            echo '|---|---|'
-            echo '| `${{ steps.meta.outputs.immutable }}` | immutable | lean |'
-            echo '| `${{ steps.meta.outputs.patch }}` | moves per recipe revision | lean |'
-            echo '| `${{ steps.meta.outputs.series }}` | moves per Go patch | lean |'
-            echo '| `${{ steps.meta.outputs.immutable }}-cgo` | immutable | cgo |'
-            echo '| `${{ steps.meta.outputs.series }}-cgo` | moves per Go patch | cgo |'
-            echo '| `latest` | moves |'
+            echo "| tag | mutability | variant |"
+            echo "|---|---|---|"
+            printf "| \`%s\` | immutable | lean |\n" "$IMMUTABLE"
+            printf "| \`%s\` | moves per recipe revision | lean |\n" "$PATCH"
+            printf "| \`%s\` | moves per Go patch | lean |\n" "$SERIES"
+            printf "| \`%s-cgo\` | immutable | cgo |\n" "$IMMUTABLE"
+            printf "| \`%s-cgo\` | moves per recipe revision | cgo |\n" "$PATCH"
+            printf "| \`%s-cgo\` | moves per Go patch | cgo |\n" "$SERIES"
+            echo "| \`latest\` | moves | lean |"
             echo
-            echo 'lean digest: `${{ steps.build.outputs.digest }}`'
-            echo 'cgo digest:  `${{ steps.build_cgo.outputs.digest }}`'
+            printf "lean digest: \`%s\`\n" "$lean_digest"
+            printf "cgo digest:  \`%s\`\n" "$cgo_digest"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.build.outputs.digest }}" > image-digest.txt
+          printf '%s\n' "$lean_digest" > lean-digest.txt
+          printf '%s\n' "$cgo_digest" > cgo-digest.txt
 
-      - name: Upload digest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Upload published digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-digest
-          path: image-digest.txt
-
-
-      # Match the verifier to the signer. `provenance: true` on build-push-action
-      # attaches SLSA provenance to the image in the registry via OCI referrers. It
-      # does not populate GitHub's attestation store, which is what
-      # `gh attestation verify` reads; that store is fed by
-      # actions/attest-build-provenance. Verifying the wrong store returns 404 on a
-      # provenance that is present and correct.
-      - name: Verify provenance is attached to both images
-        run: |
-          set -euo pipefail
-          for ref in "${IMAGE}@${{ steps.build.outputs.digest }}" \
-                     "${IMAGE}@${{ steps.build_cgo.outputs.digest }}"; do
-            docker buildx imagetools inspect "$ref" --format '{{ json .Provenance }}' \
-              | grep -q buildType || { echo "::error::no provenance attached to $ref"; exit 1; }
-            echo "provenance present: $ref"
-          done
+          name: image-digests
+          path: '*-digest.txt'
