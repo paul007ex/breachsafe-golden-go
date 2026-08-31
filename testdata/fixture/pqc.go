@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 // Package fixture exercises the post-quantum surface the toolchain exists to
 // build, so the documented gates have real code to run against.
 package fixture
