@@ -7,12 +7,15 @@ status fails the workflow on a real finding.
 
 ```sh
 gofmt -l .                         # must print nothing
+goimports -l .                     # import order/grouping; must print nothing
 go vet ./...                       # correctness checks
 go test ./...                      # unit/integration tests
 go test -race ./...                # data-race checks; CGO must be available
 go mod verify                      # module archive verification
+staticcheck ./...                  # standalone current static analysis
+gosec -exclude-generated ./...     # standalone current security analysis
 golangci-lint run --config /etc/golden-go/golangci.yml ./...
-                                    # shipped policy: staticcheck + gosec + correctness linters
+                                    # shared policy: broad correctness/security linters
 govulncheck ./...                  # reachable Go vulnerability analysis
 ```
 

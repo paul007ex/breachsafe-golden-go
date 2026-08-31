@@ -11,7 +11,14 @@
 #   golden-go-doctor --json       report image identity as JSON and exit
 #   golden-go-doctor --help       this text
 
-DOCTOR_VERSION=1.1.0
+DOCTOR_VERSION=1.2.0
+
+module_version() {
+  binary="$1"
+  module="$2"
+  go version -m "$(command -v "$binary")" 2>/dev/null \
+    | awk -v module="$module" '($1 == "mod" || $1 == "dep") && $2 == module { print $3; exit }'
+}
 
 usage() {
   sed -n '/^# Usage:/,/^#   golden-go-doctor --help/p' "$0" | sed 's/^# \{0,1\}//'
@@ -24,17 +31,23 @@ identity() {
   echo "  go              $(go version 2>/dev/null | awk '{print $3}')"
   echo "  govulncheck     $(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
   echo "  golangci-lint   v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
+  echo "  goimports       $(module_version goimports golang.org/x/tools)"
+  echo "  staticcheck     $(module_version staticcheck honnef.co/go/tools)"
+  echo "  gosec           $(module_version gosec github.com/securego/gosec/v2)"
   echo "  cgo             CGO_ENABLED=$(go env CGO_ENABLED 2>/dev/null)"
   echo "  openssl         $(find / -name 'libcrypto.so.*' -o -name 'libssl.so.*' 2>/dev/null | wc -l | tr -d ' ') shared object(s)"
   echo "  fips module     $(find /usr/local/go/lib/fips140 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ') snapshot(s)"
 }
 
 identity_json() {
-  printf '{"doctor":"%s","variant":"%s","revision":"%s","go":"%s","govulncheck":"%s","golangci_lint":"v%s","cgo_enabled":"%s","libcrypto_files":%s,"fips_snapshots":%s}\n' \
+  printf '{"doctor":"%s","variant":"%s","revision":"%s","go":"%s","govulncheck":"%s","golangci_lint":"v%s","goimports":"%s","staticcheck":"%s","gosec":"%s","cgo_enabled":"%s","libcrypto_files":%s,"fips_snapshots":%s}\n' \
     "${DOCTOR_VERSION}" "${GOLDEN_GO_VARIANT:-unknown}" "${GOLDEN_GO_REVISION:-unknown}" \
     "$(go version 2>/dev/null | awk '{print $3}')" \
     "$(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')" \
     "$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')" \
+    "$(module_version goimports golang.org/x/tools)" \
+    "$(module_version staticcheck honnef.co/go/tools)" \
+    "$(module_version gosec github.com/securego/gosec/v2)" \
     "$(go env CGO_ENABLED 2>/dev/null)" \
     "$(find / -name 'libcrypto.so.*' 2>/dev/null | wc -l | tr -d ' ')" \
     "$(find /usr/local/go/lib/fips140 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
@@ -70,9 +83,10 @@ check "go version"    "${EXPECT_GO_VERSION:-UNSET}" "$(go version | awk '{print 
 check "GOTOOLCHAIN"   "${EXPECT_GO_VERSION:-UNSET}" "${GOTOOLCHAIN:-UNSET}"
 check "govulncheck"   "${EXPECT_GOVULNCHECK:-UNSET}"    "$(govulncheck -version 2>/dev/null | sed -n 's/^Scanner: govulncheck@//p')"
 check "golangci-lint" "${EXPECT_GOLANGCI_LINT:-UNSET}" "v$(golangci-lint version 2>/dev/null | sed -n 's/.*has version \([0-9.]*\) .*/\1/p')"
-for duplicate in gosec osv-scanner staticcheck; do
-  if command -v "$duplicate" >/dev/null 2>&1; then bad "duplicate analyzer present: $duplicate"; else ok "no standalone $duplicate"; fi
-done
+check "goimports"   "${EXPECT_GOIMPORTS:-UNSET}"   "$(module_version goimports golang.org/x/tools)"
+check "staticcheck" "${EXPECT_STATICCHECK:-UNSET}" "$(module_version staticcheck honnef.co/go/tools)"
+check "gosec"       "${EXPECT_GOSEC:-UNSET}"       "$(module_version gosec github.com/securego/gosec/v2)"
+if command -v osv-scanner >/dev/null 2>&1; then bad "external scanner present: osv-scanner"; else ok "no standalone osv-scanner"; fi
 if [ ! -r /etc/golden-go/golangci.yml ]; then
   bad "shared golangci policy missing"
 elif golangci-lint linters --config /etc/golden-go/golangci.yml 2>/dev/null | grep -q '^gosec:' \

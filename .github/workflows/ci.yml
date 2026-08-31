@@ -50,9 +50,12 @@ jobs:
           docker run --rm -v "$PWD/testdata/fixture:/workspace" golden-go:lean -c '
             set -eu
             echo "::group::gofmt";        test -z "$(gofmt -l .)"      ; echo ok; echo "::endgroup::"
+            echo "::group::goimports";    test -z "$(goimports -l .)"  ; echo ok; echo "::endgroup::"
             echo "::group::go vet";       go vet ./...                 ; echo "::endgroup::"
             echo "::group::go test";      go test ./...                ; echo "::endgroup::"
             echo "::group::go mod verify"; go mod verify               ; echo "::endgroup::"
+            echo "::group::staticcheck";  staticcheck ./...            ; echo "::endgroup::"
+            echo "::group::gosec";        gosec -exclude-generated ./... ; echo "::endgroup::"
             echo "::group::govulncheck";  govulncheck ./...            ; echo "::endgroup::"
             echo "::group::golangci-lint"; golangci-lint run --config /etc/golden-go/golangci.yml ./... ; echo "::endgroup::"
           '
