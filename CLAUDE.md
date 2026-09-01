@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 -->
-# breachsafe-golden-go — repository policy
+# breachsafe-golden-go repository policy
 
 The pinned Go CI/build toolchain image for BreachSAFE Go repositories. A build-plane
 component, not an application runtime and not a place for product source. This file is
@@ -20,13 +20,13 @@ same gate list and the review sequence in more detail.
 
 Read and apply these sources in order.
 
-1. **`~/claude/CLAUDE.md`** — platform policy: licensing, the OpenSSL 3.5 LTS baseline, repo
+1. **`~/claude/CLAUDE.md`**. Platform policy: licensing, the OpenSSL 3.5 LTS baseline, repo
    identity, the greenfield rule, the ten-step change loop. It auto-loads from any ancestor
    directory.
-2. **This file** — rules for this repository. Where it refines the platform file, it does so
+2. **This file**. Rules for this repository. Where it refines the platform file, it does so
    here and names the reason.
-3. **[`AGENTS.md`](AGENTS.md)** — the invariants, the required checks, and the smoke commands.
-4. **[`docs/go-gates.md`](docs/go-gates.md)** and **[`docs/skills.md`](docs/skills.md)** — the
+3. **[`AGENTS.md`](AGENTS.md)**. The invariants, the required checks, and the smoke commands.
+4. **[`docs/go-gates.md`](docs/go-gates.md)** and **[`docs/skills.md`](docs/skills.md)**. The
    full gate list, the review order, and the skills that apply.
 
 ## 2. What this repository is
