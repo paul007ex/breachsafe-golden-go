@@ -15,7 +15,7 @@
 #
 # `go test -race` REQUIRES cgo. The lean variant cannot run it; docs/go-gates.md says so.
 
-FROM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
+FROM golang:1.27.1-alpine3.24@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS builder
 ARG GOVULNCHECK_VERSION=v1.7.0
 ARG GOLANGCI_LINT_VERSION=v2.13.2
 ARG GOIMPORTS_VERSION=v0.49.0
@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
  && go install -trimpath -ldflags='-s -w' github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} \
  && go install -trimpath -ldflags='-s -w' github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}
 
-FROM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS lean
+FROM golang:1.27.1-alpine3.24@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS lean
 ARG GOVULNCHECK_VERSION=v1.7.0
 ARG GOLANGCI_LINT_VERSION=v2.13.2
 ARG GOIMPORTS_VERSION=v0.49.0
@@ -87,7 +87,7 @@ LABEL org.opencontainers.image.title="BreachSAFE Golden Go" \
 # ---------- cgo: race detector and anything linking C ----------
 # Keeps apk, git, and OpenSSL because git-over-HTTPS requires them. OpenSSL is
 # patched via `apk upgrade` and scanned by the release workflow rather than removed.
-FROM golang:1.27.0-alpine3.24@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS cgo
+FROM golang:1.27.1-alpine3.24@sha256:cf6fca6641884b8433441b2b0652976f975e1d0fdd26d177eaaf8596087f3125 AS cgo
 ARG GOVULNCHECK_VERSION=v1.7.0
 ARG GOLANGCI_LINT_VERSION=v2.13.2
 ARG GOIMPORTS_VERSION=v0.49.0
